@@ -19,13 +19,9 @@ import {
   updateDoc,
   deleteDoc,
   doc,
-  setDoc, // <--- Added setDoc for explicit ID storage
+  setDoc,
 } from "firebase/firestore";
-import {
-  ref,
-  uploadBytes,
-  getDownloadURL,
-} from "firebase/storage";
+import { uploadToS3 } from "../utils/s3Upload";
 
 // ========================================================
 // 🔥 INLINE SERVICE (NO External Files Needed)
@@ -33,12 +29,7 @@ import {
 
 const subCategoryCollection = collection(db, "subcategories");
 
-const uploadImage = async (file) => {
-  if (!file) return null;
-  const imageRef = ref(storage, `subcategory/${Date.now()}_${file.name}`);
-  await uploadBytes(imageRef, file);
-  return await getDownloadURL(imageRef);
-};
+// Logic moved to subCategoryService using uploadToS3 utility
 
 const subCategoryService = {
   getAll: async () => {
@@ -52,7 +43,7 @@ const subCategoryService = {
     const newDocRef = doc(subCategoryCollection);
     const docId = newDocRef.id;
 
-    const imageURL = await uploadImage(file);
+    const imageURL = await uploadToS3(file, "subcategory");
 
     const newData = {
       ...data,
@@ -74,7 +65,7 @@ const subCategoryService = {
     };
 
     if (file) {
-      updateData.image = await uploadImage(file);
+      updateData.image = await uploadToS3(file, "subcategory");
     }
 
     await updateDoc(doc(db, "subcategories", id), updateData);

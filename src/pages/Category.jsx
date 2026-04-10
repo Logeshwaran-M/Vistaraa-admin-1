@@ -15,27 +15,18 @@ import {
 import { db, storage } from "../../firebase";
 import {
   collection,
-  setDoc, // <<-- CHANGED: Imported setDoc
+  setDoc,
   getDocs,
   updateDoc,
   deleteDoc,
-  doc, // <<-- USED: Imported doc
+  doc,
 } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { uploadToS3 } from "../utils/s3Upload";
 
-// ================================
-// CATEGORY SERVICE (MODIFIED TO STORE REDUNDANT ID)
-// ================================
 
 const categoryCollection = collection(db, "categories");
 
-const uploadFile = async (folder, file) => {
-  if (!file) return null;
-
-  const fileRef = ref(storage, `${folder}/${Date.now()}_${file.name}`);
-  await uploadBytes(fileRef, file);
-  return await getDownloadURL(fileRef);
-};
+// Logic moved to categoryService using uploadToS3 utility
 
 const categoryService = {
   /** Retrieves all categories from Firestore. */
@@ -47,9 +38,9 @@ const categoryService = {
   /** * MODIFIED: Uses setDoc/doc to force the Document ID into the data payload.
    */
   add: async (data, files) => {
-    const image = await uploadFile("category_images", files.image);
-    const banner = await uploadFile("category_banners", files.banner);
-    const icon = await uploadFile("category_icons", files.icon);
+    const image = await uploadToS3(files.image, "category_images");
+    const banner = await uploadToS3(files.banner, "category_banners");
+    const icon = await uploadToS3(files.icon, "category_icons");
 
     // 1. Create a reference to a new document with an auto-generated ID
     const docRef = doc(categoryCollection);
@@ -64,15 +55,11 @@ const categoryService = {
       createdAt: Date.now(),
     };
 
-    // 2. Use setDoc to write the data, including the 'id' field
     await setDoc(docRef, newData); 
     
     return newData; // newData already contains the 'id' field
   },
 
-  /** * Update is also slightly adjusted: ensures the 'id' field is present 
-   * in the update payload if other fields are changed.
-   */
   update: async (id, data, files) => {
     const updated = { 
         ...data,
@@ -80,10 +67,11 @@ const categoryService = {
     };
 
     if (files.image)
-      updated.image = await uploadFile("category_images", files.image);
+      updated.image = await uploadToS3(files.image, "category_images");
     if (files.banner)
-      updated.banner = await uploadFile("category_banners", files.banner);
-    if (files.icon) updated.icon = await uploadFile("category_icons", files.icon);
+      updated.banner = await uploadToS3(files.banner, "category_banners");
+    if (files.icon) 
+      updated.icon = await uploadToS3(files.icon, "category_icons");
 
     // The 'id' field is written along with other updates
     await updateDoc(doc(db, "categories", id), updated);
@@ -96,9 +84,6 @@ const categoryService = {
   },
 };
 
-// ================================
-// CATEGORY COMPONENT (UI/Logic remains same)
-// ================================
 
 const defaultMobileAttributes = ["RAM", "ROM", "Processor", "Battery Capacity"];
 
@@ -834,9 +819,7 @@ const Category = () => {
 
 export default Category;
 
-/**
- * Helper component for rendering image upload fields in the modal.
- */
+
 const renderImageUploader = (label, id, preview, onFileChange, onClear, color) => (
     <div className="relative group">
         <label className="block text-center text-gray-600 text-sm mb-1">{label}</label>
