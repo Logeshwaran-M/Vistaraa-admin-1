@@ -133,7 +133,7 @@ const Orders = () => {
 const API_URL =
   window.location.hostname === "localhost"
     ? "http://localhost:3000"
-    : "https://sadhana-cart-pa1w.vercel.app/";
+    : "https://vistaraa-admin-1.vercel.app/";
 
   const sendOrderEmail = async (data) => {
   try {
