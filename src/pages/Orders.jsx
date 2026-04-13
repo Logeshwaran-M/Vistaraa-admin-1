@@ -9,6 +9,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../../firebase";
+import { onSnapshot } from "firebase/firestore";
 import {
   User,
   Edit,
@@ -93,6 +94,8 @@ const Orders = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("all");
 
+
+  
   const loadOrders = async () => {
     setLoading(true);
     try {
@@ -127,6 +130,90 @@ const Orders = () => {
     });
   };
 
+const API_URL =
+  window.location.hostname === "localhost"
+    ? "http://localhost:3000"
+    : "https://sadhana-cart-pa1w.vercel.app/";
+
+  const sendOrderEmail = async (data) => {
+  try {
+    await fetch(`${API_URL}/api/sendEmail`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    });
+  } catch (err) {
+    console.error("Email failed", err);
+  }
+};
+
+useEffect(() => {
+  const unsubscribeList = [];
+  const initializedUsers = new Set(); // ✅ moved outside
+
+  const listenOrders = async () => {
+    const usersSnap = await getDocs(collection(db, "users"));
+
+    usersSnap.forEach((userDoc) => {
+      const userId = userDoc.id;
+      const userData = userDoc.data();
+
+      const unsubscribe = onSnapshot(
+        collection(db, "users", userId, "orders"),
+        (snapshot) => {
+
+          if (!initializedUsers.has(userId)) {
+            initializedUsers.add(userId);
+            return;
+          }
+
+          snapshot.docChanges().forEach(async (change) => {
+            const orderData = change.doc.data();
+
+            const order = {
+              id: change.doc.id,
+              customerId: userId,
+              customerName: userData.userName || "Customer",
+              customerEmail: userData.email || "",
+              ...orderData,
+            };
+
+            if (change.type === "added") {
+              await sendOrderEmail({
+                userEmail: order.customerEmail,
+                userName: order.customerName,
+                orderId: order.orderId,
+                status: "processing",
+                orderItems: order.products || [],
+              });
+            }
+
+            if (change.type === "modified") {
+              await sendOrderEmail({
+                userEmail: order.customerEmail,
+                userName: order.customerName,
+                orderId: order.orderId,
+                status: order.orderStatus,
+                orderItems: order.products || [],
+              });
+            }
+          });
+
+          // ❌ REMOVE THIS
+          // loadOrders();
+        }
+      );
+
+      unsubscribeList.push(unsubscribe);
+    });
+  };
+
+  listenOrders();
+
+  return () => unsubscribeList.forEach((u) => u());
+}, []);
   const getStatusColor = (status) => {
     switch (status?.toLowerCase()) {
       case 'pending': return { bg: 'bg-yellow-100', text: 'text-yellow-800', icon: Clock };
@@ -475,7 +562,7 @@ const Orders = () => {
                             value={order.orderStatus}
                             onChange={(e) => {
                               orderService.updateStatus(order.id, e.target.value, order.customerId);
-                              loadOrders();
+                             
                             }}
                             className="text-sm border border-gray-300 rounded-lg p-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
                           >
