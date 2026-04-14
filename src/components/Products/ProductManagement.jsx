@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { collection, getDocs, deleteDoc, doc } from "firebase/firestore";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { collection, getDocs, deleteDoc, doc, query, limit, startAfter, orderBy, getCountFromServer, where } from "firebase/firestore";
 import { db } from "../../../firebase";
 import { motion, AnimatePresence } from "framer-motion";
 import { RefreshCw, Package, ArrowLeft, Plus } from "lucide-react";
@@ -16,10 +16,14 @@ const ProductManagement = () => {
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [lastVisible, setLastVisible] = useState(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [stats, setStats] = useState({ totalProducts: 0, outOfStock: 0, lowStock: 0, inStock: 0 });
 
   useEffect(() => {
     fetchAll();
@@ -32,18 +36,119 @@ const ProductManagement = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
+  useEffect(() => {
+    fetchProducts();
+  }, [debouncedSearch, filterCategory]);
+
+  const fetchStats = async () => {
+    try {
+      const coll = collection(db, "products");
+      
+      // 1. Get the total count as accurately as possible
+      const totalSnap = await getCountFromServer(coll);
+      let totalCount = totalSnap.data().count;
+
+      // Log for debugging (visible if user opens inspector)
+      console.log("Stats Refresh - Total Products Found:", totalCount);
+
+      const newStats = {
+        totalProducts: totalCount,
+        outOfStock: 0,
+        lowStock: 0,
+        inStock: 0
+      };
+
+      // 2. Attempt filtered counts
+      try {
+        const [outSnap, lowSnap, inSnap] = await Promise.all([
+          getCountFromServer(query(coll, where("stock", "==", 0))),
+          getCountFromServer(query(coll, where("stock", ">", 0), where("stock", "<=", 10))),
+          getCountFromServer(query(coll, where("stock", ">", 10)))
+        ]);
+
+        newStats.outOfStock = outSnap.data().count;
+        newStats.lowStock = lowSnap.data().count;
+        newStats.inStock = inSnap.data().count;
+
+        // Validation: If filtered sums are 0 but total > 0, docs might use strings or different fields
+        if (totalCount > 0 && newStats.outOfStock + newStats.lowStock + newStats.inStock === 0) {
+          console.warn("Stock-based counts are zero. Checking for type mismatches or missing fields.");
+          // Fallback: estimate inStock as the total count if we can't narrow it down
+          newStats.inStock = totalCount;
+        }
+      } catch (err) {
+        console.warn("Filtered stats query failed:", err);
+      }
+
+      setStats(newStats);
+    } catch (error) {
+      console.error("Critical error in fetchStats:", error);
+    }
+  };
+
+  const fetchProducts = async (isLoadMore = false) => {
+    try {
+      if (isLoadMore) setLoadingMore(true);
+      else {
+        setLoading(true);
+        setProducts([]);
+        setLastVisible(null);
+      }
+
+      const productsRef = collection(db, "products");
+      let q;
+      
+      let constraints = [orderBy("name")];
+
+      if (filterCategory) {
+        constraints.push(where("category", "==", filterCategory));
+      }
+
+      if (debouncedSearch) {
+        // Since we can only do 'starts with' in Firestore and it's case-sensitive,
+        // we'll try a basic approach or just filter the whole list if it were small.
+        // For now, let's stick to name ordering and we'll apply client-side search on what's fetched.
+        // In a real production app, we'd use Algolia or a case-insensitive field.
+      }
+
+      q = query(productsRef, ...constraints, limit(50));
+
+      if (isLoadMore && lastVisible) {
+        q = query(productsRef, ...constraints, startAfter(lastVisible), limit(50));
+      }
+
+      const snapshot = await getDocs(q);
+      const newProducts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      if (isLoadMore) {
+        setProducts(prev => [...prev, ...newProducts]);
+      } else {
+        setProducts(newProducts);
+      }
+      
+      setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMore(snapshot.docs.length === 50);
+    } catch (error) {
+      console.error("Error fetching products:", error);
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  };
+
   const fetchAll = async () => {
     try {
       setLoading(true);
-      const [productsSnap, categoriesSnap, subCategoriesSnap] = await Promise.all([
-        getDocs(collection(db, "products")),
+      const [categoriesSnap, subCategoriesSnap] = await Promise.all([
         getDocs(collection(db, "categories")),
         getDocs(collection(db, "subcategories"))
       ]);
 
-      setProducts(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setSubCategories(subCategoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      
+      await fetchStats();
+      await fetchProducts();
     } catch (error) {
       console.error("Error fetching data:", error);
     } finally {
@@ -91,23 +196,34 @@ const ProductManagement = () => {
     });
   }, [products, debouncedSearch, filterCategory]);
 
-  const getCategoryName = (id) => categories.find(c => c.id === id)?.name || "N/A";
-  const getSubCategoryName = (id) => subCategories.find(s => s.id === id)?.name || "";
+  const getCategoryName = (idOrName) => {
+    // Try to find by any value passed, or look into the product object if we were to pass that.
+    // Since we pass product.category, let's keep it simple but resilient.
+    if (!idOrName) return "N/A";
+    const cat = categories.find(c => c.id === idOrName || c.name === idOrName || c.id === String(idOrName));
+    return cat ? cat.name : idOrName;
+  };
+
+  const getSubCategoryName = (idOrName) => {
+    if (!idOrName) return "";
+    const sub = subCategories.find(s => s.id === idOrName || s.name === idOrName || s.id === String(idOrName));
+    return sub ? sub.name : idOrName;
+  };
 
   return (
     <div className="min-h-screen bg-[#fcfdff] w-full pb-10">
       {/* MANAGEMENT HEADER (RESPONSIVE) */}
       <AnimatePresence mode="wait">
-        <motion.div 
+        <motion.div
           key={currentView}
-          initial={{ opacity: 0, y: -10 }} 
-          animate={{ opacity: 1, y: 0 }} 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -10 }}
           className="px-4 md:px-8 py-6 md:py-8 bg-white border-b border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sticky top-0 z-30"
         >
           <div className="flex items-center gap-4">
             {currentView !== 'list' && (
-              <button 
+              <button
                 onClick={handleBackToList}
                 className="p-2 hover:bg-gray-50 rounded-xl transition-all border border-gray-100 shadow-sm"
               >
@@ -134,14 +250,14 @@ const ProductManagement = () => {
           <div className="flex items-center gap-2 w-full md:w-auto">
             {currentView === 'list' && (
               <>
-                <button 
+                <button
                   onClick={fetchAll}
                   className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 font-bold text-sm transition-all shadow-sm"
                 >
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                   Sync
                 </button>
-                <button 
+                <button
                   onClick={handleAddNew}
                   className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-bold text-sm transition-all shadow-lg shadow-indigo-100"
                 >
@@ -165,31 +281,31 @@ const ProductManagement = () => {
             className="w-full"
           >
             {currentView === 'add' && (
-              <ProductForm 
-                mode="add" 
-                categories={categories} 
-                subCategories={subCategories} 
-                onSave={() => { fetchAll(); handleBackToList(); }} 
-                onCancel={handleBackToList} 
+              <ProductForm
+                mode="add"
+                categories={categories}
+                subCategories={subCategories}
+                onSave={() => { fetchAll(); handleBackToList(); }}
+                onCancel={handleBackToList}
               />
             )}
             {currentView === 'edit' && (
-              <ProductForm 
-                mode="edit" 
-                product={selectedProduct} 
-                categories={categories} 
-                subCategories={subCategories} 
-                onSave={() => { fetchAll(); handleBackToList(); }} 
-                onCancel={handleBackToList} 
+              <ProductForm
+                mode="edit"
+                product={selectedProduct}
+                categories={categories}
+                subCategories={subCategories}
+                onSave={() => { fetchAll(); handleBackToList(); }}
+                onCancel={handleBackToList}
               />
             )}
             {currentView === 'view' && (
-              <ProductDetails 
-                product={selectedProduct} 
-                categories={categories} 
-                subCategories={subCategories} 
-                onEdit={handleEdit} 
-                onClose={handleBackToList} 
+              <ProductDetails
+                product={selectedProduct}
+                categories={categories}
+                subCategories={subCategories}
+                onEdit={handleEdit}
+                onClose={handleBackToList}
               />
             )}
             {currentView === 'list' && (
@@ -198,6 +314,10 @@ const ProductManagement = () => {
                 categories={categories}
                 subCategories={subCategories}
                 loading={loading}
+                loadingMore={loadingMore}
+                hasMore={hasMore}
+                onLoadMore={() => fetchProducts(true)}
+                stats={stats}
                 searchTerm={searchTerm}
                 filterCategory={filterCategory}
                 filterStatus={filterStatus}

@@ -1,25 +1,33 @@
 import React from 'react';
-import { 
-  Plus, RefreshCw, Search, Eye, 
-  Edit, Trash2, Star, ShoppingCart, 
-  Package, IndianRupee, Layers 
+import {
+  Plus, RefreshCw, Search, Eye,
+  Edit, Trash2, Star, ShoppingCart,
+  Package, IndianRupee, Layers, Filter, Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ProductStats from './ProductStats';
 
 const ProductList = ({
   products,
+  categories,
   loading,
+  loadingMore,
+  hasMore,
+  onLoadMore,
+  stats: propStats,
   searchTerm,
+  filterCategory,
   onSearchChange,
+  onCategoryFilterChange,
   onAddNew,
   onEdit,
   onView,
-  onDelete, 
+  onDelete,
   onRefresh,
   getCategoryName,
   getSubCategoryName
 }) => {
+  const [showFilters, setShowFilters] = React.useState(false);
 
   const visibleProducts = React.useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -31,12 +39,8 @@ const ProductList = ({
   }, [products, searchTerm]);
 
   const stats = React.useMemo(() => {
-    const totalProducts = visibleProducts.length;
-    const outOfStock = visibleProducts.filter(p => (p.stock || 0) === 0).length;
-    const lowStock = visibleProducts.filter(p => p.stock > 0 && p.stock <= 10).length;
-    const inStock = visibleProducts.filter(p => p.stock > 10).length;
-    return { totalProducts, outOfStock, lowStock, inStock };
-  }, [visibleProducts]);
+    return propStats || { totalProducts: 0, outOfStock: 0, lowStock: 0, inStock: 0 };
+  }, [propStats]);
 
   return (
     <div className="w-full">
@@ -52,8 +56,23 @@ const ProductList = ({
             className="w-full pl-12 pr-4 py-3.5 bg-white border border-gray-100 rounded-2xl shadow-sm focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all placeholder:text-gray-400 font-medium"
           />
         </div>
-        
+
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`p-3.5 border transition-all rounded-2xl shadow-sm active:scale-95 flex items-center gap-2 ${
+              showFilters || filterCategory 
+                ? 'bg-indigo-600 border-indigo-600 text-white' 
+                : 'bg-white border-gray-100 text-gray-600 hover:bg-gray-50'
+            }`}
+            title="Toggle filters"
+          >
+            <Filter size={20} />
+            <span className="hidden sm:inline font-bold text-sm">Filter</span>
+            {filterCategory && (
+              <span className="bg-white text-indigo-600 text-[10px] px-1.5 py-0.5 rounded-full font-black">1</span>
+            )}
+          </button>
           <button
             onClick={onRefresh}
             className="p-3.5 bg-white border border-gray-100 text-gray-600 rounded-2xl hover:bg-gray-50 transition-all shadow-sm active:scale-95"
@@ -66,10 +85,61 @@ const ProductList = ({
             className="flex-1 lg:flex-none flex items-center justify-center gap-2 px-6 py-3.5 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95"
           >
             <Plus size={20} />
-            <span>Add Product</span>
+            <span className="hidden sm:inline">Add Product</span>
           </button>
         </div>
       </div>
+
+      <AnimatePresence>
+        {showFilters && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="mb-8 overflow-hidden"
+          >
+            <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-sm font-black text-gray-900 uppercase tracking-widest">Select Category</h4>
+                {filterCategory && (
+                  <button 
+                    onClick={() => onCategoryFilterChange('')}
+                    className="text-xs font-bold text-rose-500 hover:text-rose-600"
+                  >
+                    Clear Filter
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => onCategoryFilterChange('')}
+                  className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${
+                    !filterCategory 
+                      ? 'bg-indigo-600 text-white shadow-md' 
+                      : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                  }`}
+                >
+                  All Categories
+                </button>
+                {(categories || []).map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => onCategoryFilterChange(cat.id)}
+                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 ${
+                      filterCategory === cat.id 
+                        ? 'bg-indigo-600 text-white shadow-md' 
+                        : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                    }`}
+                  >
+                    {cat.name}
+                    {filterCategory === cat.id && <Check size={12} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Stats Summary */}
       <div className="mb-10">
@@ -151,9 +221,11 @@ const ProductList = ({
                         <div className="flex flex-col gap-1">
                           <span className="inline-flex items-center gap-1 w-fit px-2.5 py-1 bg-indigo-50 text-indigo-700 text-[10px] font-black rounded-lg uppercase tracking-wide">
                             <Layers size={10} />
-                            {product.categoryName || (getCategoryName ? getCategoryName(product.category) : 'N/A')}
+                            {product.categoryName || getCategoryName(product.category || product.categoryId || product.Category)}
                           </span>
-                          <span className="text-[10px] font-bold text-gray-400 ml-1">{product.subcategoryName || 'No Subcategory'}</span>
+                          <span className="text-[10px] font-bold text-gray-400 ml-1">
+                            {product.subcategoryName || getSubCategoryName(product.subcategory || product.subcategoryId || product.Subcategory) || 'No Subcategory'}
+                          </span>
                         </div>
                       </td>
 
@@ -172,14 +244,12 @@ const ProductList = ({
                       </td>
 
                       <td className="px-6 py-5">
-                        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest ${
-                          product.stock > 10 ? 'bg-emerald-50 text-emerald-600' : 
-                          product.stock > 0 ? 'bg-amber-50 text-amber-600' : 'bg-rose-50 text-rose-600'
-                        }`}>
-                          <div className={`w-1.5 h-1.5 rounded-full ${
-                             product.stock > 10 ? 'bg-emerald-500' : 
-                             product.stock > 0 ? 'bg-amber-500' : 'bg-rose-500'
-                          }`} />
+                        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest ${product.stock > 10 ? 'bg-emerald-50 text-emerald-600' :
+                            product.stock > 0 ? 'bg-amber-50 text-amber-600' : 'bg-rose-50 text-rose-600'
+                          }`}>
+                          <div className={`w-1.5 h-1.5 rounded-full ${product.stock > 10 ? 'bg-emerald-500' :
+                              product.stock > 0 ? 'bg-amber-500' : 'bg-rose-500'
+                            }`} />
                           {product.stock} Units
                         </div>
                       </td>
@@ -213,6 +283,30 @@ const ProductList = ({
                   ))}
                 </tbody>
               </table>
+              
+              {hasMore && (
+                <div className="p-8 border-t border-gray-50 flex justify-center bg-gray-50/30">
+                  <button
+                    onClick={onLoadMore}
+                    disabled={loadingMore}
+                    className="flex items-center gap-3 px-8 py-3.5 bg-white border border-gray-200 text-indigo-600 rounded-2xl font-black shadow-sm hover:border-indigo-200 hover:bg-indigo-50/50 transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {loadingMore ? (
+                      <>
+                        <RefreshCw size={18} className="animate-spin" />
+                        <span>Discovering More...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Load More Products</span>
+                        <div className="px-2 py-0.5 bg-indigo-100 text-[10px] rounded-md">
+                          +50
+                        </div>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Mobile Card Layout */}
@@ -241,7 +335,7 @@ const ProductList = ({
                     <div className="flex-1 min-w-0">
                       <h4 className="text-gray-900 font-black text-sm uppercase tracking-tight line-clamp-2 leading-tight mb-1">{product.name}</h4>
                       <div className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg w-fit uppercase mb-2">
-                        {product.categoryName || (getCategoryName ? getCategoryName(product.category) : 'General')}
+                        {product.categoryName || getCategoryName(product.category || product.categoryId || product.Category) || 'General'}
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-indigo-600 font-black text-base flex items-center">
@@ -249,17 +343,16 @@ const ProductList = ({
                           {(product.offerprice || product.price)?.toLocaleString()}
                         </span>
                         {product.offerprice < product.price && (
-                           <span className="text-gray-400 text-xs font-bold line-through">₹{product.price?.toLocaleString()}</span>
+                          <span className="text-gray-400 text-xs font-bold line-through">₹{product.price?.toLocaleString()}</span>
                         )}
                       </div>
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between pt-4 border-t border-gray-50">
-                    <div className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-lg ${
-                      product.stock > 10 ? 'bg-emerald-50 text-emerald-600' : 
-                      product.stock > 0 ? 'bg-amber-50 text-amber-600' : 'bg-rose-50 text-rose-600'
-                    }`}>
+                    <div className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-lg ${product.stock > 10 ? 'bg-emerald-50 text-emerald-600' :
+                        product.stock > 0 ? 'bg-amber-50 text-amber-600' : 'bg-rose-50 text-rose-600'
+                      }`}>
                       {product.stock} Left
                     </div>
                     <div className="flex items-center gap-1">
@@ -286,6 +379,19 @@ const ProductList = ({
                 </motion.div>
               ))}
             </div>
+
+            {/* Mobile Load More */}
+            {hasMore && (
+              <div className="mt-8 flex justify-center lg:hidden">
+                <button
+                  onClick={onLoadMore}
+                  disabled={loadingMore}
+                  className="w-full flex items-center justify-center gap-3 px-8 py-4 bg-white border border-gray-100 text-indigo-600 rounded-3xl font-black shadow-sm"
+                >
+                  {loadingMore ? <RefreshCw size={20} className="animate-spin" /> : "Load More"}
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
