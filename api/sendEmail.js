@@ -135,7 +135,7 @@ const html = `
 
     <!-- FOOTER -->
     <div style="background:#f3f4f6;padding:12px;text-align:center;font-size:12px;color:#555;">
-      © ${new Date().getFullYear()} SadhanaCart | All Rights Reserved
+      © ${new Date().getFullYear()} Vistaraa | All Rights Reserved
     </div>
 
   </div>
@@ -144,7 +144,7 @@ const html = `
 
     // ✅ SEND EMAIL
     await transporter.sendMail({
-      from: `"SadhanaCart" <${process.env.EMAIL_USER}>`,
+      from: `"Vistaraa" <${process.env.EMAIL_USER}>`,
       to: userEmail,
       subject,
       html,
