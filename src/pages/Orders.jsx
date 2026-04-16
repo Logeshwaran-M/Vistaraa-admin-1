@@ -60,7 +60,7 @@ const orderService = {
           id: orderDoc.id,
           orderId: orderData.orderId || `ORD-${orderDoc.id.slice(0, 8).toUpperCase()}`,
           customerId: userId,
-          customerName: userData.userName || "Unknown Customer",
+          customerName: userData.userName || userData.displayName || "Unknown Customer" ,
           customerEmail: userData.email || "",
           customerPhone: userData.phone || "",
           ...orderData,
